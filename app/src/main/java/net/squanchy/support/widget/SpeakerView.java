@@ -11,9 +11,6 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import com.google.firebase.storage.FirebaseStorage;
-import com.google.firebase.storage.StorageReference;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -67,16 +64,16 @@ public abstract class SpeakerView extends LinearLayout {
         speakerNameView = (TextView) findViewById(R.id.speaker_name);
     }
 
-    public void updateWith(List<Speaker> speakers) {
+    public void updateWith(List<Speaker> speakers, OnSpeakerClickListener listener) {
         speakerNameView.setText(toCommaSeparatedNames(speakers));
-        updateSpeakerPhotos(speakers);
+        updateSpeakerPhotos(speakers, listener);
     }
 
     private String toCommaSeparatedNames(List<Speaker> speakers) {
         return TextUtils.join(", ", map(speakers, Speaker::name));
     }
 
-    private void updateSpeakerPhotos(List<Speaker> speakers) {
+    private void updateSpeakerPhotos(List<Speaker> speakers, OnSpeakerClickListener listener) {
         if (imageLoader == null) {
             throw new IllegalStateException("Unable to access the ImageLoader, it hasn't been initialized yet");
         }
@@ -92,8 +89,9 @@ public abstract class SpeakerView extends LinearLayout {
         for (Speaker speaker : speakers) {
             ImageView photoView = recycleOrInflatePhotoView(photoViews);
             speakerPhotoContainer.addView(photoView);
-            if (speaker.avatarImageURL().isPresent()) {
-                loadSpeakerPhoto(photoView, speaker.avatarImageURL().get(), imageLoader);
+            if (speaker.photoUrl().isPresent()) {
+                photoView.setOnClickListener(v -> listener.onSpeakerClicked(speaker));
+                loadSpeakerPhoto(photoView, speaker.photoUrl().get(), imageLoader);
             }
         }
     }
@@ -109,16 +107,7 @@ public abstract class SpeakerView extends LinearLayout {
     protected abstract ImageView inflatePhotoView(ViewGroup speakerPhotoContainer);
 
     private void loadSpeakerPhoto(ImageView photoView, String photoUrl, ImageLoader imageLoader) {
-        if (isFirebaseStorageUrl(photoUrl)) {
-            StorageReference photoReference = FirebaseStorage.getInstance().getReference(photoUrl);
-            imageLoader.load(photoReference).into(photoView);
-        } else {
-            imageLoader.load(photoUrl).into(photoView);
-        }
-    }
-
-    private boolean isFirebaseStorageUrl(String url) {
-        return url.startsWith("gs://");            // TODO move elsewhere
+        imageLoader.load(photoUrl).into(photoView);
     }
 
     private List<ImageView> getAllImageViewsContainedIn(ViewGroup container) {
@@ -129,5 +118,10 @@ public abstract class SpeakerView extends LinearLayout {
             children.add((ImageView) child);
         }
         return children;
+    }
+
+    public interface OnSpeakerClickListener {
+
+        void onSpeakerClicked(Speaker speaker);
     }
 }

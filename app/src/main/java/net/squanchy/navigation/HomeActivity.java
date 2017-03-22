@@ -13,26 +13,31 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import net.squanchy.R;
 import net.squanchy.analytics.Analytics;
 import net.squanchy.analytics.ContentType;
 import net.squanchy.fonts.TypefaceStyleableActivity;
-import net.squanchy.service.proximity.injection.ProximityService;
+import net.squanchy.proximity.ProximityEvent;
 import net.squanchy.remoteconfig.RemoteConfig;
+import net.squanchy.service.proximity.injection.ProximityService;
 import net.squanchy.support.lang.Optional;
 import net.squanchy.support.widget.InterceptingBottomNavigationView;
 
 import io.reactivex.android.schedulers.AndroidSchedulers;
-import timber.log.Timber;
+import io.reactivex.disposables.CompositeDisposable;
 
 public class HomeActivity extends TypefaceStyleableActivity {
 
     private static final String STATE_KEY_SELECTED_PAGE_INDEX = "HomeActivity.selected_page_index";
+    private static final boolean PROXIMITY_SERVICE_RADAR_NOT_STARTED = false;
 
     private final Map<BottomNavigationSection, View> pageViews = new HashMap<>(4);
+    private final List<LifecycleView> lifecycleViews = new ArrayList<>(2);
 
     private int pageFadeDurationMillis;
 
@@ -42,6 +47,10 @@ public class HomeActivity extends TypefaceStyleableActivity {
     private ProximityService proximityService;
     private Analytics analytics;
     private RemoteConfig remoteConfig;
+    private HomeService homeService;
+    private CompositeDisposable subscriptions;
+
+    private boolean proximityServiceRadarStarted = PROXIMITY_SERVICE_RADAR_NOT_STARTED;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -52,6 +61,7 @@ public class HomeActivity extends TypefaceStyleableActivity {
 
         pageContainer = (ViewGroup) findViewById(R.id.page_container);
         collectPageViewsInto(pageViews);
+        collectLifecycleViewsViewsInto(lifecycleViews);
 
         bottomNavigationView = (InterceptingBottomNavigationView) findViewById(R.id.bottom_navigation);
         setupBottomNavigation(bottomNavigationView);
@@ -62,24 +72,40 @@ public class HomeActivity extends TypefaceStyleableActivity {
         HomeComponent homeComponent = HomeInjector.obtain(this);
         analytics = homeComponent.analytics();
         remoteConfig = homeComponent.remoteConfig();
+        homeService = homeComponent.homeService();
+        proximityService = homeComponent.proximityService();
+        subscriptions = new CompositeDisposable();
     }
 
     @Override
     protected void onStart() {
         super.onStart();
         selectInitialPage(currentSection);
-        proximityService = HomeInjector.obtain(this).service();
 
         // TODO do something useful with this once we can
         remoteConfig.proximityServicesEnabled()
                 .observeOn(AndroidSchedulers.mainThread())
                 .subscribe(enabled -> {
                     if (enabled) {
+                        proximityServiceRadarStarted = true;
                         proximityService.startRadar();
-                    } else {
-                        proximityService.stopRadar();
                     }
+
+                    subscriptions.add(
+                            proximityService.observeProximityEvents()
+                                    .observeOn(AndroidSchedulers.mainThread())
+                                    .subscribe(this::handleProximityEvent));
                 });
+
+        subscriptions.add(homeService.signInAnonymouslyIfNecessary().subscribe());
+
+        for (LifecycleView lifecycleView : lifecycleViews) {
+            lifecycleView.onStart();
+        }
+    }
+
+    private void handleProximityEvent(ProximityEvent proximityEvent) {
+        // TODO do something with the event, like showing feedback or opening an event detail
     }
 
     private void collectPageViewsInto(Map<BottomNavigationSection, View> pageViews) {
@@ -87,6 +113,12 @@ public class HomeActivity extends TypefaceStyleableActivity {
         pageViews.put(BottomNavigationSection.FAVORITES, pageContainer.findViewById(R.id.favorites_content_root));
         pageViews.put(BottomNavigationSection.TWEETS, pageContainer.findViewById(R.id.tweets_content_root));
         pageViews.put(BottomNavigationSection.VENUE_INFO, pageContainer.findViewById(R.id.venue_content_root));
+    }
+
+    private void collectLifecycleViewsViewsInto(List<LifecycleView> lifecycleViews) {
+        lifecycleViews.add((LifecycleView) pageContainer.findViewById(R.id.schedule_content_root));
+        lifecycleViews.add((LifecycleView) pageContainer.findViewById(R.id.favorites_content_root));
+        lifecycleViews.add((LifecycleView) pageContainer.findViewById(R.id.venue_content_root));
     }
 
     private void setupBottomNavigation(InterceptingBottomNavigationView bottomNavigationView) {
@@ -197,5 +229,21 @@ public class HomeActivity extends TypefaceStyleableActivity {
     protected void onSaveInstanceState(Bundle outState) {
         outState.putInt(STATE_KEY_SELECTED_PAGE_INDEX, currentSection.ordinal());
         super.onSaveInstanceState(outState);
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+
+        if (proximityServiceRadarStarted) {
+            proximityService.stopRadar();
+            proximityServiceRadarStarted = PROXIMITY_SERVICE_RADAR_NOT_STARTED;
+        }
+
+        subscriptions.clear();
+
+        for (LifecycleView lifecycleView : lifecycleViews) {
+            lifecycleView.onStop();
+        }
     }
 }

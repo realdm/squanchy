@@ -2,7 +2,6 @@ package net.squanchy.schedule;
 
 import android.app.Activity;
 import android.content.Context;
-import android.content.ContextWrapper;
 import android.content.res.TypedArray;
 import android.graphics.Typeface;
 import android.support.design.widget.CoordinatorLayout;
@@ -12,30 +11,32 @@ import android.support.v7.widget.Toolbar;
 import android.text.Spanned;
 import android.util.AttributeSet;
 import android.view.View;
+
 import net.squanchy.R;
 import net.squanchy.analytics.Analytics;
 import net.squanchy.analytics.ContentType;
+import net.squanchy.navigation.LifecycleView;
 import net.squanchy.navigation.Navigator;
-import net.squanchy.proximity.ProximityEvent;
 import net.squanchy.schedule.domain.view.Event;
 import net.squanchy.schedule.domain.view.Schedule;
 import net.squanchy.schedule.view.ScheduleViewPagerAdapter;
-import net.squanchy.service.proximity.injection.ProximityService;
 
 import io.reactivex.android.schedulers.AndroidSchedulers;
-import io.reactivex.disposables.CompositeDisposable;
+import io.reactivex.disposables.Disposable;
+import timber.log.Timber;
 import uk.co.chrisjenx.calligraphy.CalligraphyTypefaceSpan;
 import uk.co.chrisjenx.calligraphy.CalligraphyUtils;
 import uk.co.chrisjenx.calligraphy.TypefaceUtils;
 
-public class SchedulePageView extends CoordinatorLayout {
+import static net.squanchy.support.ContextUnwrapper.unwrapToActivityContext;
+
+public class SchedulePageView extends CoordinatorLayout implements LifecycleView {
 
     private ScheduleViewPagerAdapter viewPagerAdapter;
     private View progressBar;
-    private CompositeDisposable subscriptions;
+    private Disposable subscription;
     private ScheduleService service;
     private Navigator navigate;
-    private ProximityService proximityService;
     private Analytics analytics;
 
     public SchedulePageView(Context context, AttributeSet attrs) {
@@ -55,7 +56,6 @@ public class SchedulePageView extends CoordinatorLayout {
         service = component.service();
         navigate = component.navigator();
         analytics = component.analytics();
-        proximityService = component.proxService();
 
         progressBar = findViewById(R.id.progressbar);
 
@@ -70,19 +70,6 @@ public class SchedulePageView extends CoordinatorLayout {
         tabLayout.addOnTabSelectedListener(new TrackingOnTabSelectedListener(analytics, viewPagerAdapter));
 
         setupToolbar();
-    }
-
-    private static Activity unwrapToActivityContext(Context context) {
-        if (context == null) {
-            throw new NullPointerException("Context cannot be null");
-        } else if (context instanceof Activity) {
-            return (Activity) context;
-        } else if (context instanceof ContextWrapper) {
-            ContextWrapper contextWrapper = (ContextWrapper) context;
-            return unwrapToActivityContext(contextWrapper.getBaseContext());
-        } else {
-            throw new IllegalStateException("Context type not supported: " + context.getClass().getCanonicalName());
-        }
     }
 
     private void setupToolbar() {
@@ -104,18 +91,10 @@ public class SchedulePageView extends CoordinatorLayout {
     }
 
     @Override
-    public void onAttachedToWindow() {
-        super.onAttachedToWindow();
-        subscriptions = new CompositeDisposable();
-        subscriptions.add(
-                service.schedule()
-                        .observeOn(AndroidSchedulers.mainThread())
-                        .subscribe(schedule -> updateWith(schedule, this::onEventClicked)));
-
-        subscriptions.add(
-                proximityService.observeProximityEvents()
-                        .observeOn(AndroidSchedulers.mainThread())
-                        .subscribe(this::handleProximityEvent));
+    public void onStart() {
+        subscription = service.schedule(false)
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(schedule -> updateWith(schedule, this::onEventClicked), Timber::e);
     }
 
     private void onEventClicked(Event event) {
@@ -123,14 +102,9 @@ public class SchedulePageView extends CoordinatorLayout {
         navigate.toEventDetails(event.id());
     }
 
-    private void handleProximityEvent(ProximityEvent proximityEvent) {
-        // TODO do something with the event, like showing feedback or opening an event detail
-    }
-
     @Override
-    public void onDetachedFromWindow() {
-        super.onDetachedFromWindow();
-        subscriptions.dispose();
+    public void onStop() {
+        subscription.dispose();
     }
 
     private void hackToApplyTypefaces(TabLayout tabLayout) {

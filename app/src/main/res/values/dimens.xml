@@ -53,4 +53,8 @@
   <dimen name="event_details_title">24sp</dimen>
   <dimen name="event_details_fab_margin">16dp</dimen>
 
+  <dimen name="settings_avatar_width">52dp</dimen>
+  <dimen name="settings_avatar_height">52dp</dimen>
+  <dimen name="settings_background_height">154dp</dimen>
+
 </resources>
